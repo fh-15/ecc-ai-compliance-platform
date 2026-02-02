@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base import Base
 
@@ -19,3 +20,8 @@ class ComplianceScore(Base):
     gaps_count = Column(Integer, nullable=False)
 
     calculated_at = Column(DateTime, default=datetime.utcnow)
+
+    audit_session = relationship(
+        "AuditSession",
+        back_populates="score"
+    )
