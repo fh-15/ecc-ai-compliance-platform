@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base import Base
 
@@ -11,3 +12,9 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     role = Column(String, default="user")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    audit_sessions = relationship(
+        "AuditSession",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
