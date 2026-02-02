@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
@@ -14,10 +15,10 @@ class AuditAnswer(Base):
     )
 
     question = Column(Text, nullable=False)
-
-    answer = Column(
-        String,
-        nullable=False
-    )
-
+    answer = Column(String, nullable=False)
     notes = Column(Text, nullable=True)
+
+    audit_session = relationship(
+        "AuditSession",
+        back_populates="answers"
+    )
