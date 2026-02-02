@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
@@ -10,3 +11,8 @@ class ECCControl(Base):
     control_code = Column(String, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
+
+    audit_sessions = relationship(
+        "AuditSession",
+        back_populates="control"
+    )
