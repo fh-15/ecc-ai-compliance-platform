@@ -11,7 +11,12 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+
     role = Column(String, default="user")
+
+    failed_login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     audit_sessions = relationship(
