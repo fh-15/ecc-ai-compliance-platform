@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import List
 
 from app.db.session import SessionLocal
 from app.core.dependencies import get_current_user
@@ -25,9 +26,9 @@ def get_db():
         db.close()
 
 
-# -----------------------------
+# ==================================================
 # 1️⃣ Start Audit Session
-# -----------------------------
+# ==================================================
 @router.post(
     "/start",
     response_model=AuditSessionResponse,
@@ -58,9 +59,9 @@ def start_audit(
     return audit
 
 
-# -----------------------------
+# ==================================================
 # 2️⃣ Submit Audit Answer
-# -----------------------------
+# ==================================================
 @router.post(
     "/answer/{audit_id}",
     response_model=AuditAnswerResponse,
@@ -96,9 +97,9 @@ def submit_answer(
     return answer
 
 
-# -----------------------------
+# ==================================================
 # 3️⃣ Calculate Compliance Score
-# -----------------------------
+# ==================================================
 @router.post(
     "/score/{audit_id}",
     response_model=ComplianceScoreResponse,
@@ -120,7 +121,6 @@ def calculate_score(
             detail="Audit session not found"
         )
 
-    # منع إعادة الحساب
     existing_score = db.query(ComplianceScore).filter(
         ComplianceScore.audit_session_id == audit.id
     ).first()
@@ -155,3 +155,99 @@ def calculate_score(
     db.refresh(score)
 
     return score
+
+
+# ==================================================
+# 4️⃣ List User Audit Sessions
+# ==================================================
+@router.get(
+    "/my-sessions",
+    response_model=List[AuditSessionResponse],
+    status_code=status.HTTP_200_OK
+)
+def list_my_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    sessions = db.query(AuditSession).filter(
+        AuditSession.user_id == current_user.id
+    ).order_by(AuditSession.started_at.desc()).all()
+
+    return sessions
+
+
+# ==================================================
+# 5️⃣ Get Audit Session Details
+# ==================================================
+@router.get(
+    "/session/{audit_id}",
+    status_code=status.HTTP_200_OK
+)
+def get_audit_details(
+    audit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    audit = db.query(AuditSession).filter(
+        AuditSession.id == audit_id,
+        AuditSession.user_id == current_user.id
+    ).first()
+
+    if not audit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audit session not found"
+        )
+
+    return {
+        "audit_id": audit.id,
+        "status": audit.status,
+        "started_at": audit.started_at,
+        "completed_at": audit.completed_at,
+        "control_id": audit.control_id,
+        "answers": [
+            {
+                "question": a.question,
+                "answer": a.answer,
+                "notes": a.notes
+            } for a in audit.answers
+        ],
+        "score": {
+            "percentage": audit.score.score_percentage,
+            "gaps": audit.score.gaps_count,
+            "calculated_at": audit.score.calculated_at
+        } if audit.score else None
+    }
+
+
+# ==================================================
+# 6️⃣ Dashboard Summary
+# ==================================================
+@router.get(
+    "/dashboard/summary",
+    status_code=status.HTTP_200_OK
+)
+def dashboard_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    sessions = db.query(AuditSession).filter(
+        AuditSession.user_id == current_user.id
+    ).all()
+
+    total_audits = len(sessions)
+    completed = len([s for s in sessions if s.status == "completed"])
+
+    scores = [
+        s.score.score_percentage
+        for s in sessions
+        if s.score
+    ]
+
+    average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+
+    return {
+        "total_audits": total_audits,
+        "completed_audits": completed,
+        "average_score": average_score
+    }
