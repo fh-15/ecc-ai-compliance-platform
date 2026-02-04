@@ -1,11 +1,17 @@
 from langchain.vectorstores import Chroma
 from langchain.embeddings.openai import OpenAIEmbeddings
+from pathlib import Path
 
 
-def create_vector_store(docs, persist_dir="./chroma"):
+def build_vector_store(documents: list):
+    persist_directory = Path(__file__).parent / "chroma_db"
+
     embeddings = OpenAIEmbeddings()
-    return Chroma.from_documents(
-        documents=docs,
+    vectorstore = Chroma.from_documents(
+        documents=documents,
         embedding=embeddings,
-        persist_directory=persist_dir
+        persist_directory=str(persist_directory)
     )
+
+    vectorstore.persist()
+    return vectorstore
