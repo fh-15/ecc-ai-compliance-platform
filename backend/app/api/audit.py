@@ -1,253 +1,61 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
-from datetime import datetime
-from typing import List
 
-from app.db.session import SessionLocal
+from app.services.db_service import get_db
+from app.services.audit_service import AuditService
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.models.ecc_control import ECCControl
-from app.models.audit_session import AuditSession
-from app.models.audit_answer import AuditAnswer
-from app.models.compliance_score import ComplianceScore
-
-from app.schemas.audit_session import AuditSessionCreate, AuditSessionResponse
-from app.schemas.audit_answer import AuditAnswerCreate, AuditAnswerResponse
-from app.schemas.compliance_score import ComplianceScoreResponse
+from app.schemas.audit import (
+    StartAuditResponse,
+    SubmitAnswerRequest,
+    AuditResultResponse
+)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+audit_service = AuditService()
 
 
 # ==================================================
-# 1️⃣ Start Audit Session
+# 1️⃣ Start Audit
 # ==================================================
-@router.post(
-    "/start",
-    response_model=AuditSessionResponse,
-    status_code=status.HTTP_201_CREATED
-)
+@router.post("/start", response_model=StartAuditResponse)
 def start_audit(
-    data: AuditSessionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    control = db.query(ECCControl).filter(
-        ECCControl.id == data.control_id
-    ).first()
-
-    if not control:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="ECC control not found"
-        )
-
-    audit = AuditSession(
-        user_id=current_user.id,
-        control_id=control.id
-    )
-    db.add(audit)
-    db.commit()
-    db.refresh(audit)
-    return audit
+    session = audit_service.start_audit(db, current_user.id)
+    return {"session_id": session.id}
 
 
 # ==================================================
-# 2️⃣ Submit Audit Answer
+# 2️⃣ Submit Answer
 # ==================================================
-@router.post(
-    "/answer/{audit_id}",
-    response_model=AuditAnswerResponse,
-    status_code=status.HTTP_201_CREATED
-)
+@router.post("/answer", status_code=status.HTTP_200_OK)
 def submit_answer(
-    audit_id: int,
-    data: AuditAnswerCreate,
+    data: SubmitAnswerRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    audit = db.query(AuditSession).filter(
-        AuditSession.id == audit_id,
-        AuditSession.user_id == current_user.id
-    ).first()
-
-    if not audit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Audit session not found"
-        )
-
-    answer = AuditAnswer(
-        audit_session_id=audit.id,
+    audit_service.submit_answer(
+        db=db,
+        session_id=data.session_id,
+        control_code=data.control_code,
         question=data.question,
         answer=data.answer,
         notes=data.notes
     )
-
-    db.add(answer)
-    db.commit()
-    db.refresh(answer)
-    return answer
+    return {"status": "answer saved"}
 
 
 # ==================================================
-# 3️⃣ Calculate Compliance Score
+# 3️⃣ Finalize Audit + Score
 # ==================================================
-@router.post(
-    "/score/{audit_id}",
-    response_model=ComplianceScoreResponse,
-    status_code=status.HTTP_200_OK
-)
-def calculate_score(
-    audit_id: int,
+@router.post("/finalize", response_model=AuditResultResponse)
+def finalize_audit(
+    session_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    audit = db.query(AuditSession).filter(
-        AuditSession.id == audit_id,
-        AuditSession.user_id == current_user.id
-    ).first()
-
-    if not audit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Audit session not found"
-        )
-
-    existing_score = db.query(ComplianceScore).filter(
-        ComplianceScore.audit_session_id == audit.id
-    ).first()
-
-    if existing_score:
-        return existing_score
-
-    answers = audit.answers
-    if not answers:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No answers submitted for this audit"
-        )
-
-    total = len(answers)
-    compliant = sum(1 for a in answers if a.answer.lower() == "yes")
-    gaps = total - compliant
-
-    score_percentage = (compliant / total) * 100
-
-    score = ComplianceScore(
-        audit_session_id=audit.id,
-        score_percentage=round(score_percentage, 2),
-        gaps_count=gaps
-    )
-
-    audit.status = "completed"
-    audit.completed_at = datetime.utcnow()
-
-    db.add(score)
-    db.commit()
-    db.refresh(score)
-
-    return score
-
-
-# ==================================================
-# 4️⃣ List User Audit Sessions
-# ==================================================
-@router.get(
-    "/my-sessions",
-    response_model=List[AuditSessionResponse],
-    status_code=status.HTTP_200_OK
-)
-def list_my_sessions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    sessions = db.query(AuditSession).filter(
-        AuditSession.user_id == current_user.id
-    ).order_by(AuditSession.started_at.desc()).all()
-
-    return sessions
-
-
-# ==================================================
-# 5️⃣ Get Audit Session Details
-# ==================================================
-@router.get(
-    "/session/{audit_id}",
-    status_code=status.HTTP_200_OK
-)
-def get_audit_details(
-    audit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    audit = db.query(AuditSession).filter(
-        AuditSession.id == audit_id,
-        AuditSession.user_id == current_user.id
-    ).first()
-
-    if not audit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Audit session not found"
-        )
-
-    return {
-        "audit_id": audit.id,
-        "status": audit.status,
-        "started_at": audit.started_at,
-        "completed_at": audit.completed_at,
-        "control_id": audit.control_id,
-        "answers": [
-            {
-                "question": a.question,
-                "answer": a.answer,
-                "notes": a.notes
-            } for a in audit.answers
-        ],
-        "score": {
-            "percentage": audit.score.score_percentage,
-            "gaps": audit.score.gaps_count,
-            "calculated_at": audit.score.calculated_at
-        } if audit.score else None
-    }
-
-
-# ==================================================
-# 6️⃣ Dashboard Summary
-# ==================================================
-@router.get(
-    "/dashboard/summary",
-    status_code=status.HTTP_200_OK
-)
-def dashboard_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    sessions = db.query(AuditSession).filter(
-        AuditSession.user_id == current_user.id
-    ).all()
-
-    total_audits = len(sessions)
-    completed = len([s for s in sessions if s.status == "completed"])
-
-    scores = [
-        s.score.score_percentage
-        for s in sessions
-        if s.score
-    ]
-
-    average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
-
-    return {
-        "total_audits": total_audits,
-        "completed_audits": completed,
-        "average_score": average_score
-    }
+    result = audit_service.finalize_audit(db, session_id)
+    return result
