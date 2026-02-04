@@ -9,5 +9,4 @@ def load_ecc_pdf() -> list:
         raise FileNotFoundError("ECC PDF file not found")
 
     loader = PyPDFLoader(str(pdf_path))
-    documents = loader.load()
-    return documents
+    return loader.load()
